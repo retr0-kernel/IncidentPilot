@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "incidentpilot-test",
+  "main": "src/server.ts",
+  "compatibility_date": "2026-06-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "IncidentPilotAgent",
+        "name": "IncidentPilotAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": ["IncidentPilotAgent"],
+      "tag": "v1"
+    }
+  ]
+}
