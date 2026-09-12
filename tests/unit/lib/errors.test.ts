@@ -1,11 +1,17 @@
 import { ConfigurationError, NotFoundError } from "../../../src/lib/errors";
-import { InMemoryContextResolver } from "../../../src/agent/context";
-import { describe, expect, it } from "vitest";
+import { ContextService } from "../../../src/domain/context-service";
+import { describe, expect, it, vi } from "vitest";
 
-describe("InMemoryContextResolver", () => {
+describe("ContextService errors", () => {
   it("throws NotFoundError for missing context", async () => {
-    const resolver = new InMemoryContextResolver("NWE");
-    await expect(resolver.resolveContextKey("NWE-999")).rejects.toBeInstanceOf(
+    const service = new ContextService(
+      {
+        getContextByKey: vi.fn().mockResolvedValue(null)
+      } as never,
+      { contextIdPrefix: "NWE", contextSequenceWidth: 3 }
+    );
+
+    await expect(service.resolveContextKey("NWE-999")).rejects.toBeInstanceOf(
       NotFoundError
     );
   });

@@ -78,6 +78,13 @@ export class ForbiddenError extends AppError {
   }
 }
 
+export class ConflictError extends AppError {
+  constructor(message: string, details?: ErrorDetails) {
+    super("CONFLICT", message, { status: 409, details });
+    this.name = "ConflictError";
+  }
+}
+
 function statusForCode(code: ErrorCode): number {
   switch (code) {
     case "VALIDATION_ERROR":

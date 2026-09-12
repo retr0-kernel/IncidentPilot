@@ -1,31 +1,15 @@
 import type { ConversationContext } from "../domain/context";
-import { NotFoundError } from "../lib/errors";
-import { parseContextKey } from "../lib/ids";
+import type { ContextService } from "../domain/context-service";
 
 export interface ContextResolver {
   resolveContextKey(contextKey: string): Promise<ConversationContext>;
 }
 
-/**
- * Skeleton resolver — D1-backed implementation arrives in TASK 4.
- */
-export class InMemoryContextResolver implements ContextResolver {
-  constructor(
-    private readonly prefix: string,
-    private readonly contexts = new Map<string, ConversationContext>()
-  ) {}
+export class D1ContextResolver implements ContextResolver {
+  constructor(private readonly contextService: ContextService) {}
 
-  async resolveContextKey(contextKey: string): Promise<ConversationContext> {
-    const parsed = parseContextKey(contextKey, this.prefix);
-    const context = this.contexts.get(parsed.canonicalKey);
-
-    if (!context) {
-      throw new NotFoundError(`Context not found: ${parsed.canonicalKey}`, {
-        contextKey: parsed.canonicalKey
-      });
-    }
-
-    return context;
+  resolveContextKey(contextKey: string): Promise<ConversationContext> {
+    return this.contextService.resolveContextKey(contextKey);
   }
 }
 
@@ -37,5 +21,5 @@ export function normalizeContextReference(
     new RegExp(`\\b${prefix.toUpperCase()}-\\d+\\b`, "i")
   );
   if (!match) return null;
-  return parseContextKey(match[0], prefix).canonicalKey;
+  return match[0].toUpperCase();
 }

@@ -1,6 +1,5 @@
 import { createWorkersAI } from "workers-ai-provider";
 import { callable, type Schedule } from "agents";
-import { scheduleSchema } from "agents/schedule";
 import { AIChatAgent, type OnChatMessageOptions } from "@cloudflare/ai-chat";
 import {
   convertToModelMessages,
@@ -10,15 +9,19 @@ import {
   tool
 } from "ai";
 import { z } from "zod";
-import { buildBootstrapSystemPrompt } from "./prompts";
+import { buildProductionSystemPrompt } from "./prompts";
+import { ensureAgentContext, extractLatestUserText } from "./session";
+import { initialAgentState, type AgentState } from "./state";
+import { createOperationalTools } from "./tools";
 import { INCIDENT_PILOT_MODEL } from "../lib/config";
+import { createAppServices } from "../lib/services";
 import { repairWorkersAIToolCall } from "../lib/workers-ai-tool-repair";
 
-export class IncidentPilotAgent extends AIChatAgent<Env> {
+export class IncidentPilotAgent extends AIChatAgent<Env, AgentState> {
   maxPersistedMessages = 100;
   chatRecovery = true;
-  // Bootstrap demo has no MCP servers; don't block chat on MCP reconnect.
   waitForMcpConnections = false;
+  initialState: AgentState = initialAgentState();
 
   onStart() {
     this.mcp.configureOAuthCallback({
@@ -47,15 +50,44 @@ export class IncidentPilotAgent extends AIChatAgent<Env> {
     await this.removeMcpServer(serverId);
   }
 
+  @callable()
+  getActiveContextKey(): string | undefined {
+    return this.state?.contextKey;
+  }
+
+  private getServices() {
+    return createAppServices(this.env);
+  }
+
   async onChatMessage(_onFinish: unknown, options?: OnChatMessageOptions) {
+    const services = this.getServices();
     const mcpTools = this.mcp.getAITools();
     const workersai = createWorkersAI({ binding: this.env.AI });
+    const userText = extractLatestUserText(this.messages);
+    const context = await ensureAgentContext({
+      services,
+      state: this.state,
+      setState: (state) => this.setState(state),
+      agentInstanceId: this.sessionAffinity,
+      userText
+    });
+
+    if (userText) {
+      await services.context.appendMessage({
+        contextId: context.id,
+        role: "user",
+        content: userText,
+        channel: "web"
+      });
+    }
+
+    const operationalTools = createOperationalTools(services);
 
     const result = streamText({
       model: workersai(INCIDENT_PILOT_MODEL, {
         sessionAffinity: this.sessionAffinity
       }),
-      system: buildBootstrapSystemPrompt(),
+      system: buildProductionSystemPrompt(context.contextKey),
       messages: pruneMessages({
         messages: await convertToModelMessages(this.messages),
         toolCalls: "before-last-2-messages",
@@ -63,110 +95,26 @@ export class IncidentPilotAgent extends AIChatAgent<Env> {
       }),
       tools: {
         ...mcpTools,
-        getWeather: tool({
-          description: "Get the current weather for a city",
-          inputSchema: z.object({
-            city: z.string().describe("City name")
-          }),
-          execute: async ({ city }) => {
-            const conditions = ["sunny", "cloudy", "rainy", "snowy"];
-            const temp = Math.floor(Math.random() * 30) + 5;
-            return {
-              city,
-              temperature: temp,
-              condition:
-                conditions[Math.floor(Math.random() * conditions.length)],
-              unit: "celsius"
-            };
-          }
-        }),
+        ...operationalTools,
         getUserTimezone: tool({
           description:
             "Get the user's timezone from their browser. Use this when you need to know the user's local time.",
           inputSchema: z.object({})
-        }),
-        calculate: tool({
-          description:
-            "Perform a math calculation with two numbers. Requires user approval for large numbers.",
-          inputSchema: z.object({
-            a: z.number().describe("First number"),
-            b: z.number().describe("Second number"),
-            operator: z
-              .enum(["+", "-", "*", "/", "%"])
-              .describe("Arithmetic operator")
-          }),
-          needsApproval: async ({ a, b }) =>
-            Math.abs(a) > 1000 || Math.abs(b) > 1000,
-          execute: async ({ a, b, operator }) => {
-            const ops: Record<string, (x: number, y: number) => number> = {
-              "+": (x, y) => x + y,
-              "-": (x, y) => x - y,
-              "*": (x, y) => x * y,
-              "/": (x, y) => x / y,
-              "%": (x, y) => x % y
-            };
-            if (operator === "/" && b === 0) {
-              return { error: "Division by zero" };
-            }
-            return {
-              expression: `${a} ${operator} ${b}`,
-              result: ops[operator](a, b)
-            };
-          }
-        }),
-        scheduleTask: tool({
-          description:
-            "Schedule a task to be executed at a later time. Use this when the user asks to be reminded or wants something done later.",
-          inputSchema: scheduleSchema,
-          execute: async ({ when, description }) => {
-            if (when.type === "no-schedule") {
-              return "Not a valid schedule input";
-            }
-            const input =
-              when.type === "scheduled"
-                ? when.date
-                : when.type === "delayed"
-                  ? when.delayInSeconds
-                  : when.type === "cron"
-                    ? when.cron
-                    : null;
-            if (!input) return "Invalid schedule type";
-            try {
-              this.schedule(input, "executeTask", description, {
-                idempotent: true
-              });
-              return `Task scheduled: "${description}" (${when.type}: ${input})`;
-            } catch (error) {
-              return `Error scheduling task: ${error}`;
-            }
-          }
-        }),
-        getScheduledTasks: tool({
-          description: "List all tasks that have been scheduled",
-          inputSchema: z.object({}),
-          execute: async () => {
-            const tasks = this.getSchedules();
-            return tasks.length > 0 ? tasks : "No scheduled tasks found.";
-          }
-        }),
-        cancelScheduledTask: tool({
-          description: "Cancel a scheduled task by its ID",
-          inputSchema: z.object({
-            taskId: z.string().describe("The ID of the task to cancel")
-          }),
-          execute: async ({ taskId }) => {
-            try {
-              this.cancelSchedule(taskId);
-              return `Task ${taskId} cancelled.`;
-            } catch (error) {
-              return `Error cancelling task: ${error}`;
-            }
-          }
         })
       },
       experimental_repairToolCall: repairWorkersAIToolCall,
       stopWhen: stepCountIs(20),
-      abortSignal: options?.abortSignal
+      abortSignal: options?.abortSignal,
+      onFinish: async ({ text }) => {
+        if (text?.trim()) {
+          await services.context.appendMessage({
+            contextId: context.id,
+            role: "assistant",
+            content: text,
+            channel: "web"
+          });
+        }
+      }
     });
 
     return result.toUIMessageStreamResponse({
