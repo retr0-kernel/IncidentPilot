@@ -2,24 +2,20 @@ import { ConfigurationError } from "../lib/errors";
 
 export type Database = D1Database;
 
-export interface IncidentPilotBindings extends Env {
-  DB?: D1Database;
-}
+export type IncidentPilotBindings = Env;
 
 export function getDatabase(env: IncidentPilotBindings): Database {
   if (!env.DB) {
     throw new ConfigurationError(
-      'D1 binding "DB" is not configured. Add it in wrangler.jsonc during TASK 3.'
+      'D1 binding "DB" is not configured. Check d1_databases in wrangler.jsonc.'
     );
   }
   return env.DB;
 }
 
 export function hasDatabase(
-  env: IncidentPilotBindings
-): env is IncidentPilotBindings & {
-  DB: D1Database;
-} {
+  env: Partial<IncidentPilotBindings>
+): env is IncidentPilotBindings {
   return Boolean(env.DB);
 }
 

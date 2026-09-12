@@ -143,3 +143,5 @@ dist
 .dev.vars
 worker-configuration.d.ts
 
+docs/PLAN.md
+docs/TECH.md

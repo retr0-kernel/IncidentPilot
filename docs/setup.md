@@ -58,21 +58,96 @@ cp .dev.vars.example .dev.vars
 
 ## 5. Daily commands
 
+See **`docs/local-testing.md`** for the full local testing playbook.
+
 ```bash
 npm install
-npm run types      # after wrangler.jsonc changes — writes env.d.ts only
-npm run dev        # http://localhost:5173
-npm run check      # format + lint + typecheck
-npm run test       # unit + worker tests
-npm run build      # production build (same step as deploy, without wrangler deploy)
+npm run db:setup:local   # first time only
+npm run dev              # http://localhost:5173
+npm run check && npm run test && npm run build
 ```
 
 Use `npm run types`, not bare `wrangler types`. The bare command creates an extra `worker-configuration.d.ts` file that is not used by this project.
 
-## 6. What to tell the agent
+## 6. D1 database (TASK 3)
+
+Remote database: **`incidentpilot-db`**  
+Database ID: **`9f291cbc-351f-43a1-8374-95795a37235f`**  
+Binding name in Worker code: **`env.DB`**
+
+### First-time / fresh machine setup
+
+```bash
+npm run db:setup:local    # migrate + seed local D1
+```
+
+### Individual commands
+
+```bash
+npm run db:migrate:local   # apply migrations to local D1
+npm run db:seed:local      # load deterministic demo data locally
+npm run db:migrate:remote  # apply migrations to Cloudflare (needs auth)
+npm run db:seed:remote     # load demo data remotely (needs auth)
+```
+
+Migrations live in `src/db/migrations/`. Seed data lives in `src/db/seed/`.
+
+## 7. API token — when you need one
+
+**You do not need an API token for normal local development** if `wrangler login` works (you already have this).
+
+Create a token only for CI, headless shells, or when OAuth is unavailable.
+
+### Recommended Cloudflare API token permissions
+
+Create a custom token at [Cloudflare API tokens](https://dash.cloudflare.com/profile/api-tokens) with:
+
+| Permission                     | Access | Why                                   |
+| ------------------------------ | ------ | ------------------------------------- |
+| **Account → Workers Scripts**  | Edit   | Deploy Worker, run dev with remote AI |
+| **Account → Workers AI**       | Edit   | Llama 3.3 inference                   |
+| **Account → D1**               | Edit   | Migrations, seed, queries             |
+| **Account → Workers KV**       | Edit   | Optional future use                   |
+| **Account → Account Settings** | Read   | Account scoping                       |
+
+Include account resources for: **`3dfafea489fd6dc32d8407e75c9ded36`**
+
+Then set:
+
+```bash
+export CLOUDFLARE_API_TOKEN=your-token-here
+export CLOUDFLARE_ACCOUNT_ID=3dfafea489fd6dc32d8407e75c9ded36
+```
+
+Or add to `.dev.vars` (gitignored):
+
+```bash
+CLOUDFLARE_API_TOKEN=your-token-here
+CLOUDFLARE_ACCOUNT_ID=3dfafea489fd6dc32d8407e75c9ded36
+```
+
+## 8. Deployed URL
+
+The worker is named **`incidentpilot`**. It is **not deployed yet** on your account.
+
+After deploy:
+
+```bash
+npm run deploy
+```
+
+Your public URL will be printed in the terminal, typically:
+
+```
+https://incidentpilot.<your-subdomain>.workers.dev
+```
+
+Use local dev (`http://localhost:5173`) for day-to-day development. Deploy when you need a shareable link or Slack Events API callback URL.
+
+## 9. What to tell the agent
 
 When starting a new session, you can say:
 
-> Account ID is `3dfafea489fd6dc32d8407e75c9ded36`, wrangler is logged in, continue from PLAN.md.
+> Account ID is `3dfafea489fd6dc32d8407e75c9ded36`, wrangler is logged in, read `docs/TECH.md`, continue from TASK 4.
 
 No need to paste API tokens into chat — keep those in `.dev.vars` or your shell profile only.

@@ -16,11 +16,18 @@
     "deploy": "vite build && wrangler deploy",
     "build": "vite build",
     "types": "wrangler types env.d.ts",
+    "db:migrate:local": "wrangler d1 migrations apply incidentpilot-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply incidentpilot-db --remote",
+    "db:seed:local": "wrangler d1 execute incidentpilot-db --local --file=./src/db/seed/001_demo_environment.sql",
+    "db:seed:remote": "wrangler d1 execute incidentpilot-db --remote --file=./src/db/seed/001_demo_environment.sql",
+    "db:setup:local": "npm run db:migrate:local && npm run db:seed:local",
+    "postinstall": "node scripts/patch-workers-ai-streaming.mjs",
     "format": "oxfmt --write .",
     "lint": "oxlint src/",
     "check": "oxfmt --check . && oxlint src/ && tsc",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "verify": "npm run types && npm run check && npm run test && npm run build"
   },
   "dependencies": {
     "@cloudflare/ai-chat": "^0.9.3",
@@ -32,7 +39,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "streamdown": "^2.5.0",
-    "workers-ai-provider": "^3.2.1",
+    "workers-ai-provider": "^3.3.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

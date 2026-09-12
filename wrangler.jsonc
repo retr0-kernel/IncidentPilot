@@ -10,6 +10,14 @@
     "LOG_LEVEL": "info"
   },
   "ai": { "binding": "AI", "remote": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "incidentpilot-db",
+      "database_id": "9f291cbc-351f-43a1-8374-95795a37235f",
+      "migrations_dir": "src/db/migrations"
+    }
+  ],
   "assets": {
     "directory": "./public",
     "not_found_handling": "single-page-application",

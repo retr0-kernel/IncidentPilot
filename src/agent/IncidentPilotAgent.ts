@@ -12,11 +12,13 @@ import {
 import { z } from "zod";
 import { buildBootstrapSystemPrompt } from "./prompts";
 import { INCIDENT_PILOT_MODEL } from "../lib/config";
+import { repairWorkersAIToolCall } from "../lib/workers-ai-tool-repair";
 
 export class IncidentPilotAgent extends AIChatAgent<Env> {
   maxPersistedMessages = 100;
   chatRecovery = true;
-  waitForMcpConnections = true;
+  // Bootstrap demo has no MCP servers; don't block chat on MCP reconnect.
+  waitForMcpConnections = false;
 
   onStart() {
     this.mcp.configureOAuthCallback({
@@ -162,11 +164,17 @@ export class IncidentPilotAgent extends AIChatAgent<Env> {
           }
         })
       },
+      experimental_repairToolCall: repairWorkersAIToolCall,
       stopWhen: stepCountIs(20),
       abortSignal: options?.abortSignal
     });
 
-    return result.toUIMessageStreamResponse();
+    return result.toUIMessageStreamResponse({
+      onError: (error) => {
+        console.error("[IncidentPilotAgent] chat stream error:", error);
+        return error instanceof Error ? error.message : "An error occurred.";
+      }
+    });
   }
 
   async executeTask(description: string, _task: Schedule<string>) {

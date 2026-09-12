@@ -14,12 +14,14 @@ npm run dev     # local dev server (http://localhost:5173)
 
 ## Scripts
 
-| Command          | Description                                    |
-| ---------------- | ---------------------------------------------- |
-| `npm run dev`    | Start Vite dev server with Agent + WebSocket   |
-| `npm run check`  | Format, lint, and typecheck                    |
-| `npm run test`   | Run Vitest with Cloudflare Workers test plugin |
-| `npm run deploy` | Build and deploy to Cloudflare                 |
+| Command                  | Description                                    |
+| ------------------------ | ---------------------------------------------- |
+| `npm run dev`            | Start Vite dev server with Agent + WebSocket   |
+| `npm run check`          | Format, lint, and typecheck                    |
+| `npm run test`           | Run Vitest with Cloudflare Workers test plugin |
+| `npm run build`          | Production build                               |
+| `npm run db:setup:local` | Migrate + seed local D1 demo data              |
+| `npm run deploy`         | Build and deploy to Cloudflare                 |
 
 ## Architecture (bootstrap)
 
@@ -28,24 +30,25 @@ React UI  ──WebSocket──▶  IncidentPilotAgent (Durable Object)
                                │
                                ├── Workers AI (Llama 3.3)
                                ├── Agent state (SQLite)
+                               ├── D1 (contexts, incidents, demo infra)
                                └── Tools (weather, calc, schedule, …)
 ```
 
-Full architecture is documented in `PLAN.md` and will expand through TASK 2–24.
+Full architecture and build status: **`docs/TECH.md`** (updated each task).  
+Setup and auth: **`docs/setup.md`**. Local testing: **`docs/local-testing.md`**.
 
 ## Project structure
 
 ```
 src/
-  server.ts       # IncidentPilotAgent — AIChatAgent with tools
-  app.tsx         # React chat UI
-  client.tsx      # React entry
-  styles.css      # Tailwind + Kumo styles
+  index.ts                  # Worker entry
+  agent/                    # IncidentPilotAgent + tools
+  domain/                   # TypeScript domain types
+  db/                       # D1 migrations, seed, client
+  ui/                       # React chat
+docs/
+    setup.md, local-testing.md
 tests/
-  bootstrap.test.ts
-prompts/          # (TASK 22) AI-assisted development history
-docs/             # (TASK 21) architecture, demo, security
-PLAN.md           # Implementation plan and progress tracker
 ```
 
 ## AI assistance
