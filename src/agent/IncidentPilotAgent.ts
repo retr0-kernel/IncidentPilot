@@ -1,6 +1,6 @@
 import { createWorkersAI } from "workers-ai-provider";
-import { callable, routeAgentRequest, type Schedule } from "agents";
-import { getSchedulePrompt, scheduleSchema } from "agents/schedule";
+import { callable, type Schedule } from "agents";
+import { scheduleSchema } from "agents/schedule";
 import { AIChatAgent, type OnChatMessageOptions } from "@cloudflare/ai-chat";
 import {
   convertToModelMessages,
@@ -10,17 +10,15 @@ import {
   tool
 } from "ai";
 import { z } from "zod";
-import { INCIDENT_PILOT_MODEL } from "./lib/config";
+import { buildBootstrapSystemPrompt } from "./prompts";
+import { INCIDENT_PILOT_MODEL } from "../lib/config";
 
 export class IncidentPilotAgent extends AIChatAgent<Env> {
   maxPersistedMessages = 100;
   chatRecovery = true;
-  // Wait for MCP connections to be re-established after hibernation before
-  // processing a message, so MCP tools aren't intermittently missing.
   waitForMcpConnections = true;
 
   onStart() {
-    // Configure OAuth popup behavior for MCP servers that require authentication
     this.mcp.configureOAuthCallback({
       customHandler: (result) => {
         if (result.authSuccess) {
@@ -55,31 +53,20 @@ export class IncidentPilotAgent extends AIChatAgent<Env> {
       model: workersai(INCIDENT_PILOT_MODEL, {
         sessionAffinity: this.sessionAffinity
       }),
-      system: `You are IncidentPilot, an AI-powered engineering and SRE assistant. You help investigate operational problems, gather evidence, and recommend actions. Prefer evidence over assumptions. Use tools before drawing operational conclusions.
-
-You can check the weather, get the user's timezone, run calculations, and schedule tasks for this bootstrap build.
-
-${getSchedulePrompt({ date: new Date() })}
-
-If the user asks to schedule a task, use the schedule tool to schedule the task.`,
-      // Prune old tool calls and reasoning to save tokens on long conversations
+      system: buildBootstrapSystemPrompt(),
       messages: pruneMessages({
         messages: await convertToModelMessages(this.messages),
         toolCalls: "before-last-2-messages",
         reasoning: "before-last-message"
       }),
       tools: {
-        // MCP tools from connected servers
         ...mcpTools,
-
-        // Server-side tool: runs automatically on the server
         getWeather: tool({
           description: "Get the current weather for a city",
           inputSchema: z.object({
             city: z.string().describe("City name")
           }),
           execute: async ({ city }) => {
-            // Replace with a real weather API in production
             const conditions = ["sunny", "cloudy", "rainy", "snowy"];
             const temp = Math.floor(Math.random() * 30) + 5;
             return {
@@ -91,15 +78,11 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
             };
           }
         }),
-
-        // Client-side tool: no execute function — the browser handles it
         getUserTimezone: tool({
           description:
             "Get the user's timezone from their browser. Use this when you need to know the user's local time.",
           inputSchema: z.object({})
         }),
-
-        // Approval tool: requires user confirmation before executing
         calculate: tool({
           description:
             "Perform a math calculation with two numbers. Requires user approval for large numbers.",
@@ -129,7 +112,6 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
             };
           }
         }),
-
         scheduleTask: tool({
           description:
             "Schedule a task to be executed at a later time. Use this when the user asks to be reminded or wants something done later.",
@@ -157,7 +139,6 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
             }
           }
         }),
-
         getScheduledTasks: tool({
           description: "List all tasks that have been scheduled",
           inputSchema: z.object({}),
@@ -166,7 +147,6 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
             return tasks.length > 0 ? tasks : "No scheduled tasks found.";
           }
         }),
-
         cancelScheduledTask: tool({
           description: "Cancel a scheduled task by its ID",
           inputSchema: z.object({
@@ -190,13 +170,7 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
   }
 
   async executeTask(description: string, _task: Schedule<string>) {
-    // Do the actual work here (send email, call API, etc.)
     console.log(`Executing scheduled task: ${description}`);
-
-    // Notify connected clients via a broadcast event.
-    // We use broadcast() instead of saveMessages() to avoid injecting
-    // into chat history — that would cause the AI to see the notification
-    // as new context and potentially loop.
     this.broadcast(
       JSON.stringify({
         type: "scheduled-task",
@@ -206,12 +180,3 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
     );
   }
 }
-
-export default {
-  async fetch(request: Request, env: Env) {
-    return (
-      (await routeAgentRequest(request, env)) ||
-      new Response("Not found", { status: 404 })
-    );
-  }
-} satisfies ExportedHandler<Env>;

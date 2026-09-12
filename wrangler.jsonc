@@ -1,9 +1,14 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "incidentpilot",
-  "main": "src/server.ts",
+  "main": "src/index.ts",
   "compatibility_date": "2026-06-11",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "CONTEXT_ID_PREFIX": "NWE",
+    "CONTEXT_SEQUENCE_WIDTH": "3",
+    "LOG_LEVEL": "info"
+  },
   "ai": { "binding": "AI", "remote": true },
   "assets": {
     "directory": "./public",

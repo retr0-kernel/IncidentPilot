@@ -1,0 +1,10 @@
+# Copy to `.dev.vars` (gitignored). Wrangler loads this during `npm run dev`.
+# CLOUDFLARE_ACCOUNT_ID=
+
+# Optional override also set in wrangler.jsonc vars for now
+CONTEXT_ID_PREFIX=NWE
+
+# Slack
+# SLACK_CLIENT_ID=
+# SLACK_CLIENT_SECRET=
+# SLACK_SIGNING_SECRET=

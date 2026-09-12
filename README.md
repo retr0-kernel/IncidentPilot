@@ -2,8 +2,6 @@
 
 AI-powered engineering/SRE assistant on Cloudflare. Investigates operational problems using tool calling, persists conversation context across Web and Slack, requires human approval before mutations, and runs remediation through durable Workflows.
 
-> **Status:** TASK 1 complete — Cloudflare Agents bootstrap with WebSocket chat, Workers AI (Llama 3.3), React UI, Vitest, and build pipeline.
-
 ## Quick start
 
 ```bash

@@ -3,7 +3,7 @@ import { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import type { MCPServersState } from "agents";
-import type { IncidentPilotAgent } from "./server";
+import type { IncidentPilotAgent } from "../agent/IncidentPilotAgent";
 import {
   Badge,
   Button,
