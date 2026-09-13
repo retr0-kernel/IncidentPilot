@@ -12,3 +12,32 @@ body,
   height: 100%;
   margin: 0;
 }
+
+.ip-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: none;
+  background: transparent;
+  color: var(--kumo-color-text-secondary);
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.ip-nav-link:hover {
+  background: var(--kumo-color-bg-control);
+  color: var(--kumo-color-text-default);
+}
+
+.ip-nav-link-active {
+  background: var(--kumo-color-bg-control);
+  color: var(--kumo-color-text-default);
+  font-weight: 600;
+}

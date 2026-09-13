@@ -27,6 +27,7 @@
     "check": "oxfmt --check . && oxlint src/ && tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "evaluate": "vitest run tests/evaluation",
     "verify": "npm run types && npm run check && npm run test && npm run build"
   },
   "dependencies": {

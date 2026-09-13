@@ -21,7 +21,7 @@
   "assets": {
     "directory": "./public",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/agents/*", "/oauth/*"]
+    "run_worker_first": ["/agents/*", "/oauth/*", "/slack/*", "/api/*"]
   },
   "durable_objects": {
     "bindings": [
@@ -35,6 +35,13 @@
     {
       "new_sqlite_classes": ["IncidentPilotAgent"],
       "tag": "v1"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "incident-remediation-workflow",
+      "binding": "INCIDENT_REMEDIATION_WORKFLOW",
+      "class_name": "IncidentRemediationWorkflow"
     }
   ]
 }

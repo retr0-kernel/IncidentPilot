@@ -1,9 +1,20 @@
-import { Suspense, useCallback, useState, useEffect, useRef } from "react";
+import {
+  Suspense,
+  useCallback,
+  useState,
+  useEffect,
+  useRef,
+  type ReactNode
+} from "react";
 import { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import type { MCPServersState } from "agents";
 import type { IncidentPilotAgent } from "../agent/IncidentPilotAgent";
+import type { AgentState } from "../agent/state";
+import { ApprovalPanel } from "./components/ApprovalPanel";
+import { ContextBadge } from "./components/ContextBadge";
+import { ContextPage } from "./pages/ContextPage";
 import {
   Badge,
   Button,
@@ -37,8 +48,29 @@ import {
   XIcon,
   WrenchIcon,
   PaperclipIcon,
-  ImageIcon
+  ImageIcon,
+  HashIcon,
+  ListIcon
 } from "@phosphor-icons/react";
+
+type AppRoute = { view: "chat" } | { view: "context"; contextKey: string };
+
+function parseRoute(pathname = window.location.pathname): AppRoute {
+  const match = pathname.match(/^\/context\/([A-Za-z]{2,8}-\d+)\/?$/);
+  if (match) {
+    return { view: "context", contextKey: match[1].toUpperCase() };
+  }
+  return { view: "chat" };
+}
+
+function navigateTo(path: string) {
+  window.history.pushState({}, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+type AgentConnection = ReturnType<
+  typeof useAgent<IncidentPilotAgent, AgentState>
+>;
 
 // ── Attachment helpers ────────────────────────────────────────────────
 
@@ -91,6 +123,88 @@ function ThemeToggle() {
       onClick={toggle}
       aria-label="Toggle theme"
     />
+  );
+}
+
+function ShellHeader({
+  agent,
+  connected,
+  children
+}: {
+  agent: AgentConnection;
+  connected: boolean;
+  children?: ReactNode;
+}) {
+  return (
+    <header className="px-5 py-4 bg-kumo-base border-b border-kumo-line shrink-0">
+      <div className="max-w-3xl mx-auto flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-semibold text-kumo-default">
+            <span className="mr-2">🚨</span>IncidentPilot
+          </h1>
+          <ContextBadge agent={agent} connected={connected} />
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <CircleIcon
+              size={8}
+              weight="fill"
+              className={connected ? "text-kumo-success" : "text-kumo-danger"}
+            />
+            <Text size="xs" variant="secondary">
+              {connected ? "Connected" : "Disconnected"}
+            </Text>
+          </div>
+          {children}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function AppSidebar({
+  contextKey,
+  route,
+  agentState
+}: {
+  contextKey?: string;
+  route: AppRoute;
+  agentState?: AgentState;
+}) {
+  return (
+    <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-kumo-line bg-kumo-base p-4 gap-4">
+      <div className="flex items-center gap-2">
+        <ListIcon size={16} className="text-kumo-subtle" />
+        <Text size="sm" bold>
+          Navigation
+        </Text>
+      </div>
+      <nav className="flex flex-col gap-1">
+        <button
+          type="button"
+          onClick={() => navigateTo("/")}
+          className={`ip-nav-link ${route.view === "chat" ? "ip-nav-link-active" : ""}`}
+        >
+          <ChatCircleDotsIcon size={16} />
+          Chat
+        </button>
+        {contextKey && (
+          <button
+            type="button"
+            onClick={() => navigateTo(`/context/${contextKey}`)}
+            className={`ip-nav-link ${
+              route.view === "context" && route.contextKey === contextKey
+                ? "ip-nav-link-active"
+                : ""
+            }`}
+          >
+            <HashIcon size={16} />
+            {contextKey}
+          </button>
+        )}
+      </nav>
+      <ApprovalPanel agentState={agentState} />
+    </aside>
   );
 }
 
@@ -259,8 +373,15 @@ function ToolPartView({
 
 // ── Main chat ─────────────────────────────────────────────────────────
 
-function Chat() {
-  const [connected, setConnected] = useState(false);
+function Chat({
+  agent,
+  connected,
+  mcpState
+}: {
+  agent: AgentConnection;
+  connected: boolean;
+  mcpState: MCPServersState;
+}) {
   const [input, setInput] = useState("");
   const [showDebug, setShowDebug] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -268,48 +389,11 @@ function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const toasts = useKumoToastManager();
-  const [mcpState, setMcpState] = useState<MCPServersState>({
-    prompts: [],
-    resources: [],
-    servers: {},
-    tools: []
-  });
   const [showMcpPanel, setShowMcpPanel] = useState(false);
   const [mcpName, setMcpName] = useState("");
   const [mcpUrl, setMcpUrl] = useState("");
   const [isAddingServer, setIsAddingServer] = useState(false);
   const mcpPanelRef = useRef<HTMLDivElement>(null);
-
-  const agent = useAgent<IncidentPilotAgent>({
-    agent: "IncidentPilotAgent",
-    onOpen: useCallback(() => setConnected(true), []),
-    onClose: useCallback(() => setConnected(false), []),
-    onError: useCallback(
-      (error: Event) => console.error("WebSocket error:", error),
-      []
-    ),
-    onMcpUpdate: useCallback((state: MCPServersState) => {
-      setMcpState(state);
-    }, []),
-    onMessage: useCallback(
-      (message: MessageEvent) => {
-        try {
-          const data = JSON.parse(String(message.data));
-          if (data.type === "scheduled-task") {
-            toasts.add({
-              title: "Scheduled task completed",
-              description: data.description,
-              timeout: 0
-            });
-          }
-        } catch {
-          // Not JSON or not our event
-        }
-      },
-      [toasts]
-    )
-  });
 
   // Close MCP panel when clicking outside
   useEffect(() => {
@@ -467,7 +551,7 @@ function Chat() {
 
   return (
     <div
-      className="flex flex-col h-screen bg-kumo-elevated relative"
+      className="flex flex-col flex-1 min-h-0 relative"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -483,216 +567,190 @@ function Chat() {
         </div>
       )}
 
-      {/* Header */}
-      <header className="px-5 py-4 bg-kumo-base border-b border-kumo-line">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-semibold text-kumo-default">
-              <span className="mr-2">🚨</span>IncidentPilot
-            </h1>
-            <Badge variant="secondary">
-              <ChatCircleDotsIcon size={12} weight="bold" className="mr-1" />
-              Bootstrap
-            </Badge>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <CircleIcon
-                size={8}
-                weight="fill"
-                className={connected ? "text-kumo-success" : "text-kumo-danger"}
-              />
-              <Text size="xs" variant="secondary">
-                {connected ? "Connected" : "Disconnected"}
-              </Text>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <BugIcon size={14} className="text-kumo-inactive" />
-              <Switch
-                checked={showDebug}
-                onCheckedChange={setShowDebug}
-                size="sm"
-                aria-label="Toggle debug mode"
-              />
-            </div>
-            <ThemeToggle />
-            <div className="relative" ref={mcpPanelRef}>
-              <Button
-                variant="secondary"
-                icon={<PlugsConnectedIcon size={16} />}
-                onClick={() => setShowMcpPanel(!showMcpPanel)}
-              >
-                MCP
-                {mcpToolCount > 0 && (
-                  <Badge variant="primary" className="ml-1.5">
-                    <WrenchIcon size={10} className="mr-0.5" />
-                    {mcpToolCount}
-                  </Badge>
-                )}
-              </Button>
+      <ShellHeader agent={agent} connected={connected}>
+        <div className="flex items-center gap-1.5">
+          <BugIcon size={14} className="text-kumo-inactive" />
+          <Switch
+            checked={showDebug}
+            onCheckedChange={setShowDebug}
+            size="sm"
+            aria-label="Toggle debug mode"
+          />
+        </div>
+        <ThemeToggle />
+        <div className="relative" ref={mcpPanelRef}>
+          <Button
+            variant="secondary"
+            icon={<PlugsConnectedIcon size={16} />}
+            onClick={() => setShowMcpPanel(!showMcpPanel)}
+          >
+            MCP
+            {mcpToolCount > 0 && (
+              <Badge variant="primary" className="ml-1.5">
+                <WrenchIcon size={10} className="mr-0.5" />
+                {mcpToolCount}
+              </Badge>
+            )}
+          </Button>
 
-              {/* MCP Dropdown Panel */}
-              {showMcpPanel && (
-                <div className="absolute right-0 top-full mt-2 w-96 z-50">
-                  <Surface className="rounded-xl ring ring-kumo-line shadow-lg p-4 space-y-4">
-                    {/* Panel Header */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <PlugsConnectedIcon
-                          size={16}
-                          className="text-kumo-accent"
-                        />
-                        <Text size="sm" bold>
-                          MCP Servers
-                        </Text>
-                        {serverEntries.length > 0 && (
-                          <Badge variant="secondary">
-                            {serverEntries.length}
-                          </Badge>
-                        )}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        shape="square"
-                        aria-label="Close MCP panel"
-                        icon={<XIcon size={14} />}
-                        onClick={() => setShowMcpPanel(false)}
-                      />
-                    </div>
-
-                    {/* Add Server Form */}
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        handleAddServer();
-                      }}
-                      className="space-y-2"
-                    >
-                      <input
-                        type="text"
-                        value={mcpName}
-                        onChange={(e) => setMcpName(e.target.value)}
-                        aria-label="MCP server name"
-                        placeholder="Server name"
-                        className="w-full px-3 py-1.5 text-sm rounded-lg border border-kumo-line bg-kumo-base text-kumo-default placeholder:text-kumo-inactive focus:outline-none focus:ring-1 focus:ring-kumo-accent"
-                      />
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={mcpUrl}
-                          onChange={(e) => setMcpUrl(e.target.value)}
-                          aria-label="MCP server URL"
-                          placeholder="https://mcp.example.com"
-                          className="flex-1 px-3 py-1.5 text-sm rounded-lg border border-kumo-line bg-kumo-base text-kumo-default placeholder:text-kumo-inactive focus:outline-none focus:ring-1 focus:ring-kumo-accent font-mono"
-                        />
-                        <Button
-                          type="submit"
-                          variant="primary"
-                          size="sm"
-                          icon={<PlusIcon size={14} />}
-                          disabled={
-                            isAddingServer || !mcpName.trim() || !mcpUrl.trim()
-                          }
-                        >
-                          {isAddingServer ? "..." : "Add"}
-                        </Button>
-                      </div>
-                    </form>
-
-                    {/* Server List */}
+          {/* MCP Dropdown Panel */}
+          {showMcpPanel && (
+            <div className="absolute right-0 top-full mt-2 w-96 z-50">
+              <Surface className="rounded-xl ring ring-kumo-line shadow-lg p-4 space-y-4">
+                {/* Panel Header */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <PlugsConnectedIcon
+                      size={16}
+                      className="text-kumo-accent"
+                    />
+                    <Text size="sm" bold>
+                      MCP Servers
+                    </Text>
                     {serverEntries.length > 0 && (
-                      <div className="space-y-2 max-h-60 overflow-y-auto">
-                        {serverEntries.map(([id, server]) => (
-                          <div
-                            key={id}
-                            className="flex items-start justify-between p-2.5 rounded-lg border border-kumo-line"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-kumo-default truncate">
-                                  {server.name}
-                                </span>
-                                <Badge
-                                  variant={
-                                    server.state === "ready"
-                                      ? "primary"
-                                      : server.state === "failed"
-                                        ? "destructive"
-                                        : "secondary"
-                                  }
-                                >
-                                  {server.state}
-                                </Badge>
-                              </div>
-                              <span className="text-xs font-mono text-kumo-subtle truncate block mt-0.5">
-                                {server.server_url}
-                              </span>
-                              {server.state === "failed" && server.error && (
-                                <span className="text-xs text-red-500 block mt-0.5">
-                                  {server.error}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0 ml-2">
-                              {server.state === "authenticating" &&
-                                server.auth_url && (
-                                  <Button
-                                    variant="primary"
-                                    size="sm"
-                                    icon={<SignInIcon size={12} />}
-                                    onClick={() =>
-                                      window.open(
-                                        server.auth_url as string,
-                                        "oauth",
-                                        "width=600,height=800"
-                                      )
-                                    }
-                                  >
-                                    Auth
-                                  </Button>
-                                )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                shape="square"
-                                aria-label="Remove server"
-                                icon={<TrashIcon size={12} />}
-                                onClick={() => handleRemoveServer(id)}
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                      <Badge variant="secondary">{serverEntries.length}</Badge>
                     )}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    shape="square"
+                    aria-label="Close MCP panel"
+                    icon={<XIcon size={14} />}
+                    onClick={() => setShowMcpPanel(false)}
+                  />
+                </div>
 
-                    {/* Tool Summary */}
-                    {mcpToolCount > 0 && (
-                      <div className="pt-2 border-t border-kumo-line">
-                        <div className="flex items-center gap-2">
-                          <WrenchIcon size={14} className="text-kumo-subtle" />
-                          <span className="text-xs text-kumo-subtle">
-                            {mcpToolCount} tool
-                            {mcpToolCount !== 1 ? "s" : ""} available from MCP
-                            servers
+                {/* Add Server Form */}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleAddServer();
+                  }}
+                  className="space-y-2"
+                >
+                  <input
+                    type="text"
+                    value={mcpName}
+                    onChange={(e) => setMcpName(e.target.value)}
+                    aria-label="MCP server name"
+                    placeholder="Server name"
+                    className="w-full px-3 py-1.5 text-sm rounded-lg border border-kumo-line bg-kumo-base text-kumo-default placeholder:text-kumo-inactive focus:outline-none focus:ring-1 focus:ring-kumo-accent"
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={mcpUrl}
+                      onChange={(e) => setMcpUrl(e.target.value)}
+                      aria-label="MCP server URL"
+                      placeholder="https://mcp.example.com"
+                      className="flex-1 px-3 py-1.5 text-sm rounded-lg border border-kumo-line bg-kumo-base text-kumo-default placeholder:text-kumo-inactive focus:outline-none focus:ring-1 focus:ring-kumo-accent font-mono"
+                    />
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="sm"
+                      icon={<PlusIcon size={14} />}
+                      disabled={
+                        isAddingServer || !mcpName.trim() || !mcpUrl.trim()
+                      }
+                    >
+                      {isAddingServer ? "..." : "Add"}
+                    </Button>
+                  </div>
+                </form>
+
+                {/* Server List */}
+                {serverEntries.length > 0 && (
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {serverEntries.map(([id, server]) => (
+                      <div
+                        key={id}
+                        className="flex items-start justify-between p-2.5 rounded-lg border border-kumo-line"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-kumo-default truncate">
+                              {server.name}
+                            </span>
+                            <Badge
+                              variant={
+                                server.state === "ready"
+                                  ? "primary"
+                                  : server.state === "failed"
+                                    ? "destructive"
+                                    : "secondary"
+                              }
+                            >
+                              {server.state}
+                            </Badge>
+                          </div>
+                          <span className="text-xs font-mono text-kumo-subtle truncate block mt-0.5">
+                            {server.server_url}
                           </span>
+                          {server.state === "failed" && server.error && (
+                            <span className="text-xs text-red-500 block mt-0.5">
+                              {server.error}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 ml-2">
+                          {server.state === "authenticating" &&
+                            server.auth_url && (
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                icon={<SignInIcon size={12} />}
+                                onClick={() =>
+                                  window.open(
+                                    server.auth_url as string,
+                                    "oauth",
+                                    "width=600,height=800"
+                                  )
+                                }
+                              >
+                                Auth
+                              </Button>
+                            )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            shape="square"
+                            aria-label="Remove server"
+                            icon={<TrashIcon size={12} />}
+                            onClick={() => handleRemoveServer(id)}
+                          />
                         </div>
                       </div>
-                    )}
-                  </Surface>
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
+
+                {/* Tool Summary */}
+                {mcpToolCount > 0 && (
+                  <div className="pt-2 border-t border-kumo-line">
+                    <div className="flex items-center gap-2">
+                      <WrenchIcon size={14} className="text-kumo-subtle" />
+                      <span className="text-xs text-kumo-subtle">
+                        {mcpToolCount} tool
+                        {mcpToolCount !== 1 ? "s" : ""} available from MCP
+                        servers
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </Surface>
             </div>
-            <Button
-              variant="secondary"
-              icon={<TrashIcon size={16} />}
-              onClick={clearHistory}
-            >
-              Clear
-            </Button>
-          </div>
+          )}
         </div>
-      </header>
+        <Button
+          variant="secondary"
+          icon={<TrashIcon size={16} />}
+          onClick={clearHistory}
+        >
+          Clear
+        </Button>
+      </ShellHeader>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
@@ -962,6 +1020,81 @@ function Chat() {
   );
 }
 
+function AppShell() {
+  const [route, setRoute] = useState<AppRoute>(parseRoute);
+  const [connected, setConnected] = useState(false);
+  const [mcpState, setMcpState] = useState<MCPServersState>({
+    prompts: [],
+    resources: [],
+    servers: {},
+    tools: []
+  });
+  const toasts = useKumoToastManager();
+
+  useEffect(() => {
+    const onPopState = () => setRoute(parseRoute());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const agent = useAgent<IncidentPilotAgent, AgentState>({
+    agent: "IncidentPilotAgent",
+    onOpen: useCallback(() => setConnected(true), []),
+    onClose: useCallback(() => setConnected(false), []),
+    onError: useCallback(
+      (error: Event) => console.error("WebSocket error:", error),
+      []
+    ),
+    onMcpUpdate: useCallback((state: MCPServersState) => {
+      setMcpState(state);
+    }, []),
+    onMessage: useCallback(
+      (message: MessageEvent) => {
+        try {
+          const data = JSON.parse(String(message.data));
+          if (data.type === "scheduled-task") {
+            toasts.add({
+              title: "Scheduled task completed",
+              description: data.description,
+              timeout: 0
+            });
+          }
+        } catch {
+          // Not JSON or not our event
+        }
+      },
+      [toasts]
+    )
+  });
+
+  const contextKey = agent.state?.contextKey;
+
+  return (
+    <div className="flex h-screen bg-kumo-elevated">
+      <AppSidebar
+        contextKey={contextKey}
+        route={route}
+        agentState={agent.state}
+      />
+      <div className="flex flex-1 flex-col min-w-0">
+        {route.view === "context" ? (
+          <>
+            <ShellHeader agent={agent} connected={connected}>
+              <ThemeToggle />
+            </ShellHeader>
+            <ContextPage
+              contextKey={route.contextKey}
+              onBack={() => navigateTo("/")}
+            />
+          </>
+        ) : (
+          <Chat agent={agent} connected={connected} mcpState={mcpState} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <Toasty>
@@ -972,7 +1105,7 @@ export default function App() {
           </div>
         }
       >
-        <Chat />
+        <AppShell />
       </Suspense>
     </Toasty>
   );

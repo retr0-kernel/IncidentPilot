@@ -1,6 +1,7 @@
-import type { ConversationContext } from "../domain/context";
+import type { ConversationContext, MessageChannel } from "../domain/context";
 import { extractContextKeyFromText } from "../lib/ids";
 import type { ContextService } from "../domain/context-service";
+import { assertSafeUserText } from "../lib/security";
 import type { AgentState } from "./state";
 
 export async function ensureAgentContext(input: {
@@ -9,7 +10,15 @@ export async function ensureAgentContext(input: {
   setState: (state: AgentState) => void;
   agentInstanceId: string;
   userText?: string;
+  sourceChannel?: MessageChannel;
+  createdBy?: string;
+  sourceReference?: string | null;
 }): Promise<ConversationContext> {
+  const sourceChannel = input.sourceChannel ?? "web";
+  const createdBy = input.createdBy ?? "web-user";
+  if (input.userText) {
+    assertSafeUserText(input.userText);
+  }
   const referenced = input.userText
     ? extractContextKeyFromText(
         input.userText,
@@ -34,9 +43,9 @@ export async function ensureAgentContext(input: {
   }
 
   const context = await input.services.context.createContext({
-    createdBy: "web-user",
-    sourceChannel: "web",
-    sourceReference: input.agentInstanceId,
+    createdBy,
+    sourceChannel,
+    sourceReference: input.sourceReference ?? input.agentInstanceId,
     agentInstanceId: input.agentInstanceId
   });
 

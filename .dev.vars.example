@@ -4,7 +4,8 @@
 # Optional override also set in wrangler.jsonc vars for now
 CONTEXT_ID_PREFIX=NWE
 
-# Slack
+# Slack (Events API + interactive approvals)
 # SLACK_CLIENT_ID=
 # SLACK_CLIENT_SECRET=
 # SLACK_SIGNING_SECRET=
+# SLACK_BOT_TOKEN=

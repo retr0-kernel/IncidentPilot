@@ -1,3 +1,5 @@
+import type { ChannelType } from "../domain";
+
 export interface PendingApprovalState {
   action: string;
   incidentId?: string;
@@ -7,6 +9,7 @@ export interface PendingApprovalState {
 export interface AgentState {
   contextKey?: string;
   contextId?: string;
+  activeChannel?: ChannelType;
   activeWorkflowId?: string;
   activeIncidentIds?: string[];
   currentService?: string;

@@ -3,6 +3,13 @@ import { z } from "zod";
 import type { AppServices } from "../../lib/services";
 import { toToolError } from "../../domain/investigation";
 import { SERVICE_NAMES } from "../../db/seed/constants";
+import { withRetry, withTimeout } from "../../lib/reliability";
+
+const TOOL_TIMEOUT_MS = 8000;
+
+async function runTool<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  return withRetry(() => withTimeout(fn(), TOOL_TIMEOUT_MS, label), 2, 50);
+}
 
 const serviceNameSchema = z.enum([
   SERVICE_NAMES.checkout,
@@ -22,7 +29,9 @@ export function createInfrastructureTools(services: AppServices) {
       }),
       execute: async ({ serviceName }) => {
         try {
-          return await services.infrastructure.getServiceHealth(serviceName);
+          return await runTool("getServiceHealth", () =>
+            services.infrastructure.getServiceHealth(serviceName)
+          );
         } catch (error) {
           return toToolError(error);
         }
@@ -292,11 +301,128 @@ export function createInvestigationTools(services: AppServices) {
   };
 }
 
-export function createOperationalTools(services: AppServices) {
+export function createOperationalTools(
+  services: AppServices,
+  options?: {
+    agentContext?: {
+      contextId: string;
+      contextKey: string;
+      agentInstanceId: string;
+    };
+    startRemediationWorkflow?: (input: {
+      incidentId: string;
+      contextId: string;
+      contextKey: string;
+      serviceName: string;
+      proposedAction: string;
+      remediationActionId: string;
+    }) => Promise<string>;
+  }
+) {
   return {
     ...createInfrastructureTools(services),
     ...createContextTools(services),
     ...createIncidentTools(services),
-    ...createInvestigationTools(services)
+    ...createInvestigationTools(services),
+    ...createRemediationTools(services, options)
+  };
+}
+
+export function createRemediationTools(
+  services: AppServices,
+  options?: {
+    agentContext?: {
+      contextId: string;
+      contextKey: string;
+      agentInstanceId: string;
+    };
+    startRemediationWorkflow?: (input: {
+      incidentId: string;
+      contextId: string;
+      contextKey: string;
+      serviceName: string;
+      proposedAction: string;
+      remediationActionId: string;
+    }) => Promise<string>;
+  }
+) {
+  return {
+    proposeRemediation: tool({
+      description:
+        "Propose a remediation action for human approval. Starts a durable workflow that waits for approval before simulated execution.",
+      inputSchema: z.object({
+        incidentRef: z
+          .string()
+          .describe("Incident key (INC-42) or internal UUID"),
+        serviceName: serviceNameSchema,
+        action: z.string().min(3).max(500),
+        reason: z.string().min(3).max(1000)
+      }),
+      execute: async ({ incidentRef, serviceName, action, reason }) => {
+        try {
+          if (!options?.agentContext || !options.startRemediationWorkflow) {
+            return toToolError(
+              new Error("Remediation workflow host is unavailable")
+            );
+          }
+
+          const incident = incidentRef.startsWith("INC-")
+            ? await runTool("getIncidentByKey", () =>
+                services.incidents.getIncidentByKey(incidentRef)
+              )
+            : await runTool("getIncidentById", () =>
+                services.incidents.getIncidentById(incidentRef)
+              );
+
+          const proposal = await runTool("proposeRemediation", () =>
+            services.remediation.proposeRemediation({
+              incidentId: incident.id,
+              action,
+              requestedBy: "incidentpilot-agent"
+            })
+          );
+
+          await services.memory.recordFact(
+            options.agentContext.contextId,
+            `Proposed remediation for ${serviceName}: ${action}. Reason: ${reason}`
+          );
+
+          const workflowId = await options.startRemediationWorkflow({
+            incidentId: incident.id,
+            contextId: options.agentContext.contextId,
+            contextKey: options.agentContext.contextKey,
+            serviceName,
+            proposedAction: action,
+            remediationActionId: proposal.id
+          });
+
+          return {
+            remediationId: proposal.id,
+            workflowId,
+            incidentKey: incident.incidentKey,
+            status: "awaiting_approval",
+            message:
+              "Remediation proposed. A human must approve before execution proceeds."
+          };
+        } catch (error) {
+          return toToolError(error);
+        }
+      }
+    }),
+
+    executeRemediation: tool({
+      description:
+        "Direct remediation execution is blocked. Use proposeRemediation and wait for human approval.",
+      inputSchema: z.object({
+        incidentRef: z.string(),
+        action: z.string()
+      }),
+      execute: async () => ({
+        error: true,
+        code: "APPROVAL_REQUIRED",
+        message:
+          "Direct executeRemediation is disabled. Call proposeRemediation and approve via Web or Slack."
+      })
+    })
   };
 }
